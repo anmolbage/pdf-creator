@@ -1,5 +1,5 @@
 /* PDF Creator — service worker: offline app shell + receives files shared from other apps */
-const CACHE = 'pdf-creator-v0.2.0';   // bump with VERSION in js/app.js on every release
+const CACHE = 'pdf-creator-v0.2.1';   // bump with VERSION in js/app.js on every release
 const SHELL = [
   './', './index.html', './manifest.json', './css/app.css', './js/app.js', './js/basket.js',
   './icons/icon-192.png', './icons/icon-512.png',
