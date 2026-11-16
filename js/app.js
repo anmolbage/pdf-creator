@@ -2,7 +2,7 @@
    Everything runs in the browser; no file leaves the device. */
 'use strict';
 
-const VERSION = '0.2.2';
+const VERSION = '0.2.3';
 const { PDFDocument } = PDFLib;
 
 // A4 in PDF points (1pt = 1/72 inch) and in CSS px at 96dpi
@@ -596,6 +596,15 @@ document.addEventListener('drop', (e) => { if (e.dataTransfer && e.dataTransfer.
 // offline support + receiving shared files
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});
+  // when a new release takes over, reload once so the new screens show straight away
+  // (files in the list are kept in the basket, so nothing is lost)
+  if (navigator.serviceWorker.controller) {
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (reloaded || !document.querySelector('#busy').classList.contains('hidden')) return;
+      reloaded = true; location.reload();
+    });
+  }
 }
 
 // on start: bring back files from the basket (including any just shared from another app)

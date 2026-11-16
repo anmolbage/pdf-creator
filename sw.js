@@ -1,15 +1,17 @@
-/* PDF Creator — service worker: offline app shell + receives files shared from other apps */
-const CACHE = 'pdf-creator-v0.2.2';   // bump with VERSION in js/app.js on every release
+/* PDF Creator — service worker: offline support + receives files shared from other apps */
+const CACHE = 'pdf-creator-v0.2.3';   // bump with VERSION in js/app.js on every release
 const SHELL = [
   './', './index.html', './manifest.json', './css/app.css', './js/app.js', './js/basket.js',
-  './icons/icon-192.png', './icons/icon-512.png',
+  './icons/icon-192.png?v=2', './icons/icon-512.png?v=2',
   './vendor/pdf-lib.min.js',
 ];
 importScripts('./js/basket.js');
 
-// big converters are cached the first time they are used
+// cache: 'reload' skips the browser's HTTP cache, so a new release never stores stale copies
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(CACHE)
+    .then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' }))))
+    .then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', (e) => {
   e.waitUntil(caches.keys()
@@ -18,20 +20,35 @@ self.addEventListener('activate', (e) => {
 });
 
 self.addEventListener('fetch', (e) => {
-  const url = new URL(e.request.url);
+  const req = e.request;
+  const url = new URL(req.url);
   if (url.origin !== location.origin) return;
   // "Share → PDF Creator" from WhatsApp, Drive, scanner apps…: Android POSTs the files here
-  if (e.request.method === 'POST' && url.pathname.endsWith('/share')) {
-    e.respondWith(receiveShare(e.request));
+  if (req.method === 'POST' && url.pathname.endsWith('/share')) {
+    e.respondWith(receiveShare(req));
     return;
   }
-  if (e.request.method !== 'GET') return;
-  const opts = e.request.mode === 'navigate' ? { ignoreSearch: true } : undefined;
-  e.respondWith(caches.match(e.request, opts).then((hit) => hit || fetch(e.request).then((res) => {
-    if (res.ok && e.request.mode !== 'navigate') { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(e.request, copy)); }
-    return res;
-  })));
+  if (req.method !== 'GET') return;
+  // big libraries and icons never change under the same name → cache first
+  if (/\/(vendor|icons)\//.test(url.pathname)) {
+    e.respondWith(caches.match(req).then((hit) => hit || fetchAndStore(req)));
+    return;
+  }
+  // the app's own pages, code and manifest → always try the network first, cache when offline
+  e.respondWith(fetchAndStore(req, { cache: 'no-cache' }).catch(() =>
+    caches.match(req, { ignoreSearch: req.mode === 'navigate' })
+      .then((hit) => hit || (req.mode === 'navigate' ? caches.match('./index.html') : Response.error()))));
 });
+
+async function fetchAndStore(req, init) {
+  const res = await fetch(req.mode === 'navigate' ? req.url : req, init);
+  if (res.ok && res.type === 'basic') {
+    const copy = res.clone();
+    const key = req.mode === 'navigate' ? './index.html' : req;
+    caches.open(CACHE).then((c) => c.put(key, copy));
+  }
+  return res;
+}
 
 async function receiveShare(request) {
   let n = 0;
