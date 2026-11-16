@@ -93,6 +93,15 @@ button{font:inherit;color:inherit;cursor:pointer;border:0;background:none}
 .del{width:32px;height:32px;border-radius:8px;display:grid;place-items:center;color:var(--text-3);flex:none}
 .del:hover{color:var(--danger);background:var(--surface-2)}
 
+.scan-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin:12px 0 0;padding:14px;
+  border-radius:var(--r);background:var(--surface);box-shadow:var(--shadow);color:var(--brand-2);font-weight:600}
+.tip{font-size:13.5px;color:var(--text-2)}
+.tip b{color:var(--text)}
+.tip p{margin:4px 0 0}
+.tip .small-note{font-size:12px;margin-top:8px}
+.install{border-left:4px solid var(--brand-2)}
+.primary.small{padding:9px 16px;font-size:14px;margin-top:10px}
+.more{display:flex;gap:8px}
 .ghost{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;margin:10px 0 0;padding:12px;
   border:1.5px dashed var(--line);border-radius:14px;color:var(--brand-2);font-weight:600}
 .ghost:hover{border-color:var(--brand-2)}

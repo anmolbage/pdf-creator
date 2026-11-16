@@ -2,7 +2,7 @@
    Everything runs in the browser; no file leaves the device. */
 'use strict';
 
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 const { PDFDocument } = PDFLib;
 
 // A4 in PDF points (1pt = 1/72 inch) and in CSS px at 96dpi
@@ -110,19 +110,48 @@ function askText() {
 }
 
 /* ---------- adding files ---------- */
-async function addFiles(fileList) {
+// fileList: picked/dropped files (saved to the basket here), or records already in the basket
+async function addFiles(fileList, fromBasket) {
   const files = [...fileList];
   if (!files.length) return;
-  for (const file of files) {
-    const type = detectType(file);
-    state.items.push({ id: ++state.seq, added: state.seq, file, name: file.name, type, pages: null, thumb: null, error: null });
+  let recs = fromBasket ? files : [];
+  if (!fromBasket) {
+    try { recs = await Basket.add(files); }
+    catch { recs = files.map((f) => ({ key: Basket.newKey(), blob: f, name: f.name, lastModified: f.lastModified })); }
   }
-  applySort(state.sort);
+  for (const r of recs) {
+    const file = r.blob instanceof File ? r.blob : new File([r.blob], r.name, { type: r.type || r.blob.type, lastModified: r.lastModified });
+    state.items.push({ id: ++state.seq, key: r.key, added: state.seq, file, name: file.name, type: detectType(file), pages: null, thumb: null, error: null });
+  }
+  if (state.sort === 'custom') renderList(); else applySort(state.sort);
   show('order');
   const bad = files.filter((f) => detectType(f).startsWith('bad'));
   if (bad.length) toast(`${bad.length} file(s) can't be converted and will be skipped`);
   // fill in thumbnails and page counts in the background
   for (const item of state.items) if (!item.thumbDone) { item.thumbDone = true; makeThumb(item).then(renderList).catch(() => {}); }
+}
+
+// remember the order across reloads (each share from another app reloads the page)
+const ORDER_KEY = 'pdf-creator.order';
+function saveOrder() {
+  try { localStorage.setItem(ORDER_KEY, JSON.stringify({ sort: state.sort, keys: state.items.map((i) => i.key) })); } catch {}
+}
+async function restoreBasket() {
+  let recs = [];
+  try { recs = await Basket.all(); } catch { return; }
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(ORDER_KEY) || 'null'); } catch {}
+  if (saved && saved.sort === 'custom') {
+    // keep the user's order; newly shared files go to the end
+    const pos = new Map(saved.keys.map((k, i) => [k, i]));
+    recs.sort((a, b) => (pos.get(a.key) ?? 1e9 + a.added) - (pos.get(b.key) ?? 1e9 + b.added));
+    state.sort = 'custom';
+    document.querySelectorAll('.sort').forEach((b) => b.classList.remove('active'));
+  } else if (saved && saved.sort) {
+    state.sort = saved.sort;
+    document.querySelectorAll('.sort').forEach((b) => b.classList.toggle('active', b.dataset.sort === saved.sort));
+  }
+  await addFiles(recs, true);
 }
 
 async function makeThumb(item) {
@@ -192,6 +221,7 @@ function renderList() {
   const total = good.reduce((s, i) => s + (i.pages || 0), 0);
   $('#barPages').textContent = good.length ? (known ? `${total} page${total === 1 ? '' : 's'}` : `${total}+ pages`) : '';
   $('#btnCreate').disabled = !good.length;
+  saveOrder();
   if (!n) show('add');
 }
 
@@ -217,6 +247,7 @@ $('#list').addEventListener('click', (e) => {
   else if (btn.dataset.act === 'del') {
     const it = state.items.find((x) => x.id === id);
     if (it && it.thumb && it.thumb.startsWith('blob:')) URL.revokeObjectURL(it.thumb);
+    if (it) Basket.remove(it.key).catch(() => {});
     state.items = state.items.filter((x) => x.id !== id);
     renderList();
   }
@@ -491,7 +522,8 @@ async function createPdf() {
 function outName() {
   return ($('#outName').value.trim() || 'Merged').replace(/\.pdf$/i, '').replace(/[\\/:*?"<>|]+/g, '-');
 }
-const nextFrame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+// let the progress overlay repaint; the timeout keeps going when the app is in the background
+const nextFrame = () => new Promise((r) => { requestAnimationFrame(() => setTimeout(r, 0)); setTimeout(r, 60); });
 
 /* ---------- screens & helpers ---------- */
 function show(name) {
@@ -516,6 +548,7 @@ function toast(msg) {
 function reset() {
   state.items.forEach((it) => it.thumb && it.thumb.startsWith('blob:') && URL.revokeObjectURL(it.thumb));
   state.items = []; state.sort = 'suggested';
+  Basket.clear().catch(() => {});
   document.querySelectorAll('.sort').forEach((b) => b.classList.toggle('active', b.dataset.sort === 'suggested'));
   $('#fileInput').value = '';
   renderList();
@@ -524,7 +557,15 @@ function reset() {
 
 /* ---------- wiring ---------- */
 $('#fileInput').addEventListener('change', (e) => { addFiles(e.target.files); e.target.value = ''; });
+$('#cameraInput').addEventListener('change', (e) => {
+  // camera photos all arrive as "image.jpg" — give each a unique, ordered name
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '');
+  const files = [...e.target.files].map((f, i) => new File([f], `Scan ${stamp}${i ? '-' + i : ''}.jpg`, { type: f.type || 'image/jpeg', lastModified: Date.now() }));
+  addFiles(files); e.target.value = '';
+});
+$('#btnCamera').addEventListener('click', () => $('#cameraInput').click());
 $('#btnAddMore').addEventListener('click', () => $('#fileInput').click());
+$('#btnScanMore').addEventListener('click', () => $('#cameraInput').click());
 document.querySelector('.sorts').addEventListener('click', (e) => {
   const b = e.target.closest('.sort'); if (b) applySort(b.dataset.sort);
 });
@@ -552,7 +593,31 @@ const dz = $('#dropZone');
 ['dragleave', 'drop'].forEach((ev) => document.addEventListener(ev, (e) => { e.preventDefault(); if (ev === 'drop' || !e.relatedTarget) dz.classList.remove('over'); }));
 document.addEventListener('drop', (e) => { if (e.dataTransfer && e.dataTransfer.files.length) addFiles(e.dataTransfer.files); });
 
-// offline support
+// offline support + receiving shared files
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
+
+// on start: bring back files from the basket (including any just shared from another app)
+(async () => {
+  const params = new URLSearchParams(location.search);
+  const shared = params.get('shared');
+  if (shared !== null) history.replaceState(null, '', location.pathname);
+  await restoreBasket();
+  if (shared !== null) {
+    const n = Number(shared);
+    toast(n ? `Added ${n} shared file${n > 1 ? 's' : ''}. Share more, or check the order.` : 'Nothing to add. Share a file, not a link.');
+  }
+})();
+
+// show install hint on Android Chrome before the app is installed
+let installEvt = null;
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvt = e; $('#installCard').classList.remove('hidden'); });
+$('#btnInstall').addEventListener('click', async () => {
+  if (!installEvt) return;
+  installEvt.prompt();
+  await installEvt.userChoice.catch(() => {});
+  installEvt = null;
+  $('#installCard').classList.add('hidden');
+});
+window.addEventListener('appinstalled', () => $('#installCard').classList.add('hidden'));
