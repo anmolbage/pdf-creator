@@ -2,7 +2,7 @@
    Everything runs in the browser; no file leaves the device. */
 'use strict';
 
-const VERSION = '0.2.1';
+const VERSION = '0.2.2';
 const { PDFDocument } = PDFLib;
 
 // A4 in PDF points (1pt = 1/72 inch) and in CSS px at 96dpi
